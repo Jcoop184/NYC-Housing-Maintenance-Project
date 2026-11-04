@@ -18,6 +18,6 @@ Interact with the suite of dashboards on Tableau Public
 
 <p align="center">
   <a href="https://public.tableau.com/app/profile/jalil.cooper/viz/NYCHousingPreservationandDevelopment2022MaintenanceReport/ExecutiveDashboard" target="_blank">
-    <img src="images/nyc-housing-dashboard.png" alt="NYC Housing Preservation and Development Dashboard" width="80%">
+    <img src="images/NYC-Housing-Dashboard.png" alt="NYC Housing Preservation and Development Dashboard" width="80%">
   </a>
 </p>
