@@ -1,0 +1,354 @@
+-- Creating and inserting values into my NYC neighborhood demographics table with data retreieved from the API
+create or replace table JC_NYC_Neighborhood_Dim(
+    geo_id varchar(20) PRIMARY KEY
+    , median_income float
+    , number_of_rent_burdened_households int
+    , number_of_vacant_units int
+    , avg_household_size float
+    , number_of_households_receiving_SNAP_Benefits int
+    , tract int
+    , county int
+    , state int
+);
+
+insert into JC_NYC_Neighborhood_Dim(
+    geo_id
+    , median_income
+    , number_of_rent_burdened_households
+    , number_of_vacant_units
+    , avg_household_size
+    , number_of_households_receiving_SNAP_Benefits
+    , tract
+    , county
+    , state
+)
+
+select 
+    n.geoid::varchar
+    , IFF(n."Median_Income_B19013" = -666666666, null, n."Median_Income_B19013")
+    , n."Rent_Burdened_B25070"
+    , n."Vacant_Units_B25002"
+    , IFF(d."Average_Household_Size_DP02_0016E" = -666666700, null, d."Average_Household_Size_DP02_0016E")
+    , d."Number_of_Households_Receiving_SNAP_Food_Stamps_DP03_0074E"
+    , n."Tract"
+    , n."County"
+    , n."State"
+from
+    "JC_NYC_Neighborhood_Overview_Raw" as n
+join
+    "JC_NYC_ACS5_Demographics_Table_Raw" as d on n.geoid = d.geoid
+where
+    n.geoid is not null;
+
+-- creating a secondary dimension table that focuses specifically on demographics
+
+create or replace table JC_NYC_Demographics_Dim(
+    geo_id varchar(20) PRIMARY KEY
+    , median_age float
+    , total_population int
+    , female_population int
+    , male_population int
+    , white_population int -- all race fields are for people that identify as a single race only
+    , black_or_african_american_population int
+    , hispanic_or_latino_population int
+    , asian_population int
+    , number_of_high_school_graduates int -- specifically the number of people that are 25 and over that have graduated high school
+    , number_of_college_graduates int -- specifically the number of people that are 25 and over that have a bacheloras degree
+);
+
+insert into JC_NYC_Demographics_Dim(
+    geo_id
+    , median_age
+    , total_population
+    , female_population
+    , male_population
+    , white_population
+    , black_or_african_american_population
+    , hispanic_or_latino_population
+    , asian_population
+    , number_of_high_school_graduates
+    , number_of_college_graduates
+)
+
+select
+   geoid::varchar
+   , "Median_Age_DP05_0018E"
+   , "Total_Pop_DP05_0001E"
+   , "Female_Pop_DP05_0003E"
+   , "Male_Pop_DP05_0002E"
+   , "White_Alone_Pop_DP05_0037E"
+   , "Black_or_African_American_Pop_DP05_0038E"
+   , "Hispanic_or_Latino_Pop_DP05_0076E"
+   , "Asian_Alone_Pop_DP05_0047E"
+   , "Pop_25_and_Over_HS_Grad_or_Higher_DP02_0067E"
+   , "Pop_25_and_Over_Bachelors_or_Higher_DP02_0068E"
+from
+    "JC_NYC_ACS5_Demographics_Table_Raw"
+where
+    geoid is not null;
+
+-- creating the building dimension table
+create or replace table JC_NYC_Buildings_Dim(
+    building_id int PRIMARY KEY
+    , street_code int
+    , longitude float
+    , latitude float
+    , council_district int
+    , geoid varchar(20)
+    ,  CONSTRAINT fk_buildings_neighborhoods FOREIGN KEY (geoid) REFERENCES JC_NYC_Neighborhood_Dim (geo_id)
+
+);
+
+insert into JC_NYC_Buildings_Dim(
+    building_id
+    , street_code
+    , longitude
+    , latitude
+    , council_district
+    , geoid 
+)
+
+with borough_codes as(
+select
+    "Borough",
+    "BoroID",
+        case "BoroID"
+            when '1' then '061'
+            when '2' then '005'
+            when '3' then '047'
+            when '4' then '081'
+            else '085'
+        end as boro_code
+from
+    "JC_NYC_Housing_Code_Violations_Raw"
+group by
+    all
+)
+
+select distinct
+    h."BuildingID"::int
+    , h."StreetCode"::int
+    , h."Longitude"::float
+    , h."Latitude"::float
+    , h."CouncilDistrict"::int
+    , '36' || b.boro_code ||
+        case
+            when length(h."CensusTract") >= 4 then lpad(h."CensusTract", 6, '0')
+            else lpad(h."CensusTract", 4, '0') || '00'
+        end as geoid
+from "JC_NYC_Housing_Code_Violations_Raw" as h
+join borough_codes as b on b."BoroID" = h."BoroID"
+qualify row_number() over (partition by h."BuildingID" order by to_date(h."InspectionDate", 'MM/DD/YYYY') desc) = 1;
+
+
+-- creating house dimension table
+create or replace table JC_NYC_House_Dim(
+    house_id int PRIMARY KEY
+    , house_number varchar(20)
+    , apartment varchar(20)
+    , building_id int
+    , CONSTRAINT fk_houses_buildings FOREIGN KEY (building_id) REFERENCES JC_NYC_Buildings_Dim (building_id)
+);
+
+insert into JC_NYC_House_Dim(
+    house_id
+    , house_number
+    , apartment 
+    , building_id
+)
+with house_id_table as (
+    select
+        row_number() over (order by building_id, house_number, apartment) as house_id
+        , *
+    from (
+        select distinct
+            "BuildingID"::int as building_id
+            , "HouseNumber"::varchar as house_number
+            , "Apartment"::varchar   as apartment
+        from "JC_NYC_Housing_Code_Violations_Raw"
+    )
+)     
+select 
+    house_id
+    , house_number
+    , apartment
+    , building_id
+from 
+    house_id_table;
+
+-- creating violation class dimension table
+create or replace table JC_NYC_Violation_Class_Dim(
+    violation_class_id int PRIMARY KEY
+    , class varchar(10)
+);
+
+insert into JC_NYC_Violation_Class_Dim(
+    violation_class_id
+    , class
+)
+
+with violation_id_table as(
+select distinct
+    row_number() over (order by "Class" asc) as violation_class_id
+    , "Class"as class
+from
+    "JC_NYC_Housing_Code_Violations_Raw"
+group by
+    "Class"
+)
+
+select
+    violation_class_id
+    , class
+from
+    violation_id_table;
+
+-- creating violation_notice_fact_table
+create or replace table JC_NYC_violation_notice_descriptons_fact(
+    nov_id int PRIMARY KEY
+    , nov_issue_date date
+    , nov_description varchar(500)
+);
+
+insert into JC_NYC_violation_notice_descriptons_fact(
+    nov_id
+    , nov_issue_date
+    , nov_description
+)
+
+select
+    "NOVID"
+    , to_date("NOVIssuedDate", 'MM/DD/YYYY') as nov_issue_date
+    , "NOVDescription"
+from 
+    "JC_NYC_Housing_Code_Violations_Raw"
+where
+    NOVID is not null;
+
+-- violation status TABLE
+create or replace table JC_NYC_nov_status_table(
+    nov_status_id int PRIMARY KEY
+    , nov_status varchar(300)
+);
+
+insert into JC_NYC_nov_status_table(
+    nov_status_id
+    , nov_status
+)
+
+select distinct
+    "CurrentStatusID"::int as nov_status_id
+    , "CurrentStatus"
+from 
+    "JC_NYC_Housing_Code_Violations_Raw"
+group by
+    all
+order by
+    nov_status_id asc;
+
+-- creating violations fact table
+create or replace table JC_NYC_Violations_Fact(
+    violation_id int PRIMARY KEY
+    , violation_class_id int NOT NULL
+    , house_id int NOT NULL
+    , boro_id int
+    , violation_status_id int
+    , nov_status_id int
+    , notice_of_violation_id int
+    , registration_id int NOT NULL
+    , violation_inspection_date date
+    , violation_approve_date date
+    , original_certify_by_date date
+    , original_correct_by_date date
+    , certified_date date
+    , rentimpairing boolean
+    , neighborhood varchar(100)
+);
+
+insert into JC_NYC_Violations_Fact(
+    violation_id 
+    , violation_class_id 
+    , house_id
+    , boro_id
+    , violation_status_id
+    , nov_status_id 
+    , notice_of_violation_id
+    , registration_id 
+    , violation_inspection_date 
+    , violation_approve_date 
+    , original_certify_by_date 
+    , original_correct_by_date 
+    , certified_date
+    , rentimpairing
+    , neighborhood
+)
+with violation_id_table as(
+select distinct
+    row_number() over (order by "Class" asc) as violation_class_id
+    , "Class"as class
+from
+    "JC_NYC_Housing_Code_Violations_Raw"
+group by
+    "Class"
+),
+house_id_table as (
+    select
+        row_number() over (order by building_id, house_number, apartment) as house_id
+        , *
+    from (
+        select distinct
+            "BuildingID"::int as building_id
+            , "HouseNumber"::varchar as house_number
+            , "Apartment"::varchar   as apartment
+        from "JC_NYC_Housing_Code_Violations_Raw"
+    )
+),
+
+borough_codes as(
+select
+    "Borough",
+    "BoroID",
+        case "BoroID"
+            when '1'::int then '061'::int
+            when '2'::int then '005'::int
+            when '3'::int then '047'::int
+            when '4'::int then '081'::int
+            else '085'::int
+        end as boro_code
+from
+    "JC_NYC_Housing_Code_Violations_Raw"
+group by
+    all
+)
+select distinct
+    v."ViolationID"::int as violation_id
+    , vc.violation_class_id
+    , h.house_id
+    , b.boro_code
+    , IFF(v."ViolationStatus" = 'Open', 1, 2) as violation_status
+    , v."CurrentStatusID"::int as nov_status_id
+    , v.novid::int as nov_id
+    , v."RegistrationID"::int as registration_id
+    , to_date(v."InspectionDate", 'MM/DD/YYYY')
+    , to_date(v."ApprovedDate", 'MM/DD/YYYY')
+    , to_date(v."OriginalCertifyByDate", 'MM/DD/YYYY')
+    , to_date(v."OriginalCorrectByDate", 'MM/DD/YYYY')
+    , to_date(v."CertifiedDate", 'MM/DD/YYYY')
+    , IFF(v."RentImpairing" = 'Y', TRUE, FALSE)
+    , v.nta as neighborhood
+from
+    "JC_NYC_Housing_Code_Violations_Raw" as v
+left join
+   violation_id_table as vc on vc.class = v."Class"
+left join
+    house_id_table as h on 
+        h.building_id = v."BuildingID" and
+        h.house_number = v."HouseNumber" and
+        h.apartment = v."Apartment"
+join
+    borough_codes as b on v."BoroID" = b."BoroID"
+where
+    v."ViolationID" is not null
+    and h.house_id is not null
+    and registration_id is not null
+    and violation_class_id is not null;
