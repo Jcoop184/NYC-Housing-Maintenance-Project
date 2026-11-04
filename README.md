@@ -5,6 +5,8 @@ For this project, I built an end-to-end data pipeline using Housing Maintenance 
 - Allow them to target housing developments for maintenance equitably
 - Allow them to develop housing policy to mitigate landlord power and improve tenant agency
 
+In this repo, specifically in the Snwoflake Schema branch you can see the SQL I wrote to create all my fact and dimension tables for this project.
+
 ## Stack
 
 1. Data Ingestion: Alteryx
@@ -13,3 +15,9 @@ For this project, I built an end-to-end data pipeline using Housing Maintenance 
 
 ## Dashboards
 Interact with the suite of dashboards on Tableau Public
+
+<p align="center">
+  <a href="https://public.tableau.com/app/profile/jalil.cooper/viz/NYCHousingPreservationandDevelopment2022MaintenanceReport/ExecutiveDashboard" target="_blank">
+    <img src="images/nyc-housing-dashboard.png" alt="NYC Housing Preservation and Development Dashboard" width="80%">
+  </a>
+</p>
