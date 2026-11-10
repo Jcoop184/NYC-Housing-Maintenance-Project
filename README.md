@@ -1,7 +1,6 @@
 # New York City Housing Maintenance Violations: End-to-End Data Pipeline & Dashboards
 
 **Author:** Jalil Cooper, Data Analytics Consultant
-**Project Type:** Data School Capstone
 **Completed:** October 2026
 **Live Dashboards:** [NYC Housing Preservation and Development 2022 Maintenance Report (Tableau Public)](https://public.tableau.com/app/profile/jalil.cooper/viz/NYCHousingPreservationandDevelopment2022MaintenanceReport/ExecutiveDashboard)
 
